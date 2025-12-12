@@ -1,0 +1,10 @@
+# Core libraries
+pandas==2.3.3             # Utile pour la manipulation des données batch (CSV) et la simulation
+numpy==2.2.6             # Dépendance de Pandas
+pyspark==4.0.1            # La librairie PySpark (avec toutes ses dépendances)
+
+# Kafka Producer (Script 02_kafka_producer_stream.py)
+kafka-python==2.3.0       # Librairie Python pour se connecter au broker Kafka
+
+# Pour la manipulation de fichiers
+tqdm==4.67.1

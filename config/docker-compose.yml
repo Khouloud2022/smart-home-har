@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # 1. Zookeeper: Requis par Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  # 2. Kafka Broker
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Configuration pour l'accès INTERNE (port 9092, utilisé par Spark) et EXTERNE (port 9093, utilisé par le producteur local)
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+  # 3. Environnement Spark/PySpark (Utilisant l'image Jupyter stable)
+  spark-notebook:
+    image: jupyter/pyspark-notebook:latest 
+    hostname: spark-notebook
+    container_name: spark-notebook
+    depends_on:
+      - kafka
+    ports:
+      - "8888:8888" # Jupyter Notebook
+      - "4040:4040" # Interface Web Spark UI pour le suivi
+    user: root # Nécessaire pour les permissions de montage et spark-submit
+    environment:
+      # Paramètres passés à Spark pour inclure le connecteur Kafka
+      # L'image latest contient souvent Spark 3.5.x, donc on spécifie le connecteur correspondant
+      SPARK_OPTS: "--packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1"
+      JUPYTER_ENABLE_LAB: 'yes'
+      GRANT_SUDO: "yes"
+    volumes:
+      # Montage du dossier racine du projet (deux points car le compose.yml est dans /config)
+      - ..:/home/jovyan/work 
+      # Le chemin à l'intérieur du conteneur pour accéder à vos fichiers sera /home/jovyan/work/src/, /home/jovyan/work/data/, etc.
