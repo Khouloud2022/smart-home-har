@@ -1,0 +1,1 @@
+{"class":"org.apache.spark.ml.feature.VectorAssembler","timestamp":1765533098325,"sparkVersion":"3.5.0","uid":"VectorAssembler_aeab41726ad8","paramMap":{"outputCol":"features_raw","inputCols":["pressure_value","hour_of_day"]},"defaultParamMap":{"outputCol":"VectorAssembler_aeab41726ad8__output","handleInvalid":"error"}}
