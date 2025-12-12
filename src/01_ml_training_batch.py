@@ -1,5 +1,3 @@
-# src/01_ml_training_batch.py
-
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, hour, when
 from pyspark.ml.feature import VectorAssembler, StandardScaler
@@ -10,36 +8,56 @@ from pyspark.ml import Pipeline
 spark = SparkSession.builder.appName("HAR_Batch_Training").getOrCreate()
 
 # --- 2. Chemins et Constantes ---
-# NOUVEAUX CHEMINS pour l'image Docker jupyter/pyspark-notebook
 DATA_PATH = "/home/jovyan/work/data/raw/"
 MODEL_PATH = "/home/jovyan/work/models/spark_har_pipeline"
 BED_PRESSURE_SENSOR = "P02"
 
 # --- 3. Chargement des Données Brutes ---
 print("Chargement des données brutes de capteurs...")
-df = spark.read.csv(
-    DATA_PATH + "sensor_sample_int.csv",
-    header=True,
-    inferSchema=True
-) 
-# ATTENTION: Nous utilisons les noms de colonnes inférés par Spark (timestamp, sensor_id, value)
 
-# Filtrer pour ne garder que le capteur de pression du lit (P02)
-# Correction: Utilisation de 'sensor_id' (minuscule)
-df_bed = df.filter(col("sensor_id") == BED_PRESSURE_SENSOR)
+try:
+    df = spark.read.csv(
+        DATA_PATH + "sensor_sample_int.csv",
+        header=True,
+        inferSchema=True
+    )
+    print(f"✓ Fichier chargé avec succès")
+    print(f"  Nombre de lignes: {df.count()}")
+    print(f"  Colonnes: {df.columns}")
+    df.show(5)
+    
+except Exception as e:
+    print(f"✗ ERREUR lors de la lecture du fichier: {e}")
+    print(f"  Chemin attendu: {DATA_PATH}sensor_sample_int.csv")
+    spark.stop()
+    exit(1)
 
-# --- 4. Feature Engineering & Création du Label (is_sleeping) ---
-# Correction: Utilisation de 'timestamp' au lieu de 'timestamp_ms'
-# Nous supposons toujours que la colonne 'timestamp' est en millisecondes (MS), d'où la division par 1000.
+# Vérifier que la colonne sensor_id existe
+if "sensor_id" not in df.columns:
+    print(f"✗ ERREUR: colonne 'sensor_id' introuvable!")
+    print(f"  Colonnes disponibles: {df.columns}")
+    spark.stop()
+    exit(1)
+
+# --- 4. Filtrage du capteur ---
+print(f"\nFiltrage du capteur {BED_PRESSURE_SENSOR}...")
+df_bed = df.filter(col("sensor_id").cast("string") == BED_PRESSURE_SENSOR)
+
+if df_bed.count() == 0:
+    print(f"✗ ERREUR: Aucune donnée trouvée pour le capteur {BED_PRESSURE_SENSOR}")
+    print(f"  Capteurs disponibles: {df.select('sensor_id').distinct().collect()}")
+    spark.stop()
+    exit(1)
+
+print(f"✓ {df_bed.count()} lignes filtrées pour le capteur {BED_PRESSURE_SENSOR}")
+
+# --- 5. Feature Engineering & Création du Label ---
 df_bed = df_bed.withColumn(
     "timestamp_s",
     (col("timestamp").cast("long") / 1000).cast("timestamp")
-) \
-.withColumn("hour_of_day", hour(col("timestamp_s")))
-# Simuler le label 'is_sleeping': 1 si Pression > 1500 (personne au lit) ET Heure est Nocturne (22h à 7h)
-BED_PRESSURE_THRESHOLD = 1500.0
+).withColumn("hour_of_day", hour(col("timestamp_s")))
 
-# Correction: Utilisation de 'value' au lieu de 'Value'
+BED_PRESSURE_THRESHOLD = 1500.0
 df_labeled = df_bed.withColumn(
     "is_sleeping",
     when(
@@ -49,24 +67,21 @@ df_labeled = df_bed.withColumn(
     ).otherwise(0)
 )
 
-# Nous simplifions les features pour le ML: Pression et l'Heure
 df_ml = df_labeled.select(
-    col("value").alias("pressure_value"), # 'value' est le capteur de pression
+    col("value").alias("pressure_value"),
     col("hour_of_day"),
     col("is_sleeping").alias("label")
 )
 
-# Enlever les valeurs nulles pour l'entraînement
 df_ml = df_ml.na.drop()
+print(f"✓ Données préparées: {df_ml.count()} lignes")
 
-# --- 5. Création du Pipeline ML ---
-# 5a. VectorAssembler: Combine les features en un seul vecteur
+# --- 6. Création du Pipeline ML ---
 assembler = VectorAssembler(
     inputCols=["pressure_value", "hour_of_day"],
     outputCol="features_raw"
 )
 
-# 5b. StandardScaler: Mise à l'échelle (facultatif mais recommandé pour la régression logistique)
 scaler = StandardScaler(
     inputCol="features_raw",
     outputCol="features",
@@ -74,19 +89,18 @@ scaler = StandardScaler(
     withMean=False
 )
 
-# 5c. Algorithme: Régression Logistique
 lr = LogisticRegression(featuresCol="features", labelCol="label")
 
-# 5d. Pipeline: La chaîne complète des étapes
 pipeline = Pipeline(stages=[assembler, scaler, lr])
 
-# --- 6. Entraînement et Sauvegarde ---
-print("Démarrage de l'entraînement du modèle...")
-# Utiliser un petit échantillon (0.1) pour accélérer le temps d'exécution
+# --- 7. Entraînement et Sauvegarde ---
+print("\nDémarrage de l'entraînement du modèle...")
 model = pipeline.fit(df_ml.sample(fraction=0.1, seed=42))
 
-# Sauvegarde du pipeline COMPLET
-model.write().overwrite().save(MODEL_PATH)
-print(f"Modèle entraîné et sauvegardé à: {MODEL_PATH}")
-
+try:
+    model.write().overwrite().save(MODEL_PATH)
+    print(f"✓ Modèle entraîné et sauvegardé à: {MODEL_PATH}")
+except Exception as e:
+    print(f"✗ ERREUR lors de la sauvegarde: {e}")
+    
 spark.stop()
